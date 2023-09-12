@@ -1,16 +1,19 @@
 """This module contains the TrafficSignal class, which represents a traffic signal in the simulation."""
 import os
 import sys
+import sumolib
+import math
 from typing import Callable, List, Union
-
+import numpy as np
+from gymnasium import spaces
+from operator import itemgetter
+import pandas as pd
 
 if "SUMO_HOME" in os.environ:
     tools = os.path.join(os.environ["SUMO_HOME"], "tools")
     sys.path.append(tools)
 else:
     raise ImportError("Please declare the environment variable 'SUMO_HOME'")
-import numpy as np
-from gymnasium import spaces
 
 
 class TrafficSignal:
@@ -45,16 +48,16 @@ class TrafficSignal:
     MIN_GAP = 2.5
 
     def __init__(
-        self,
-        env,
-        ts_id: str,
-        delta_time: int,
-        yellow_time: int,
-        min_green: int,
-        max_green: int,
-        begin_time: int,
-        reward_fn: Union[str, Callable],
-        sumo,
+            self,
+            env,
+            ts_id: str,
+            delta_time: int,
+            yellow_time: int,
+            min_green: int,
+            max_green: int,
+            begin_time: int,
+            reward_fn: Union[str, Callable],
+            sumo,
     ):
         """Initializes a TrafficSignal object.
 
@@ -101,13 +104,201 @@ class TrafficSignal:
         self.out_lanes = list(set(self.out_lanes))
         self.lanes_length = {lane: self.sumo.lane.getLength(lane) for lane in self.lanes + self.out_lanes}
 
+        self.all_lanes = self.lanes + self.out_lanes
+
+        nd = NetworkData(self.env._net)
+        self.netdata = nd.get_net_data()
+        self.clock_wise_lanes = self._reshape_index()
+
         self.observation_space = self.observation_fn.observation_space()
         self.action_space = spaces.Discrete(self.num_green_phases)
+
+    @staticmethod
+    def custom_sort_rule(char):
+        # order = {'s': 2, 'r': 1, 'l': 3}
+        order = {'r': 1, 'R': 2, 's': 3, 'L': 4, 'l': 5, 't': 6}
+        return order.get(char, 0)
+
+    def _reshape_index(self):
+        print("##### reshaped lane tsc index #####")
+
+        # incoming_roads = self.netdata["inter"][self.id]["incoming"]
+        # incoming_roads = [r for r in self.netdata['inter'][self.id]['incoming']]
+
+        # reorder incoming roads
+        self.all_roads = [self.netdata['lane'][lane]["edge"] for lane in self.all_lanes]
+        self.all_roads = list(set(self.all_roads))
+
+        heading = {}
+        for road in self.all_roads:
+            road_from = self.netdata['edge'][road]['coord'][0]
+            road_to = self.netdata['edge'][road]['coord'][1]
+            angle_x = road_from[0] - road_to[0]
+            angle_y = road_from[1] - road_to[1]
+            theta = math.atan2(angle_y, angle_x)
+            degrees = math.degrees(theta)
+            adjusted_degrees = (90 - degrees) % 360
+            # print("road is ", road)
+            # print("theta is ", adjusted_degrees)
+            heading[road] = adjusted_degrees
+
+        sorted_heading = sorted(heading.items(), key=itemgetter(1))
+        sorted_dict = {k: v for k, v in sorted_heading}
+
+        # create tsc index Dataframe : merged_df
+
+        tls_index = self.netdata["inter"][self.id]["tlsindex"]
+        tls_index_dir = self.netdata["inter"][self.id]["tlsindexdir"]
+
+        def remove_negative(tls_dict):
+            temp_to_remove = []
+            for idx in tls_dict:
+                if idx < 0:
+                    temp_to_remove.append(idx)
+            for idx in temp_to_remove:
+                del tls_dict[idx]
+            return tls_dict
+
+        tls_index = remove_negative(tls_index)
+        tls_index_dir = remove_negative(tls_index_dir)
+
+        df1 = pd.DataFrame(list(tls_index.items()), columns=['tsl_index', 'lane_name'])
+        df2 = pd.DataFrame(list(tls_index_dir.items()), columns=['tsl_index', 'lane_dir'])
+
+        # concatenate DataFrame
+        merged_df = pd.concat([df1, df2['lane_dir']], axis=1)
+
+        def is_consecutive_increment(sequence):
+            n = len(sequence)
+            if n <= 1:
+                return True
+            for i in range(1, n):
+                if sequence[i] != sequence[i - 1] + 1:
+                    return False
+            return True
+
+        # get the origin tsl index of a intersection, it should be a monotonically increasing sequence with a step of 1
+        self.tsl_index_origin = sorted(merged_df["tsl_index"].tolist())
+        # print("self.tsl_index_origin is ", self.tsl_index_origin)
+        assert is_consecutive_increment(self.tsl_index_origin), "tsl index error !!!!"
+
+        merged_df['reordered_index'] = [-1 for _ in range(len(merged_df))]
+
+        # reorder tsc index
+        temp_id = min(self.tsl_index_origin)
+        for road in sorted_dict:
+            lane_reverse = False
+            lane_list = self.netdata["edge"][road]["lanes"]
+            if "r" in self.netdata["lane"][lane_list[0]]['movement'] or "l" in self.netdata["lane"][lane_list[-1]][
+                'movement']:
+                lane_reverse = False
+            elif "l" in self.netdata["lane"][lane_list[0]]['movement'] or "r" in self.netdata["lane"][lane_list[-1]][
+                'movement']:
+                lane_reverse = True
+            if lane_reverse:
+                lane_list.reverse()
+            for lane_ in lane_list:
+                if lane_ in merged_df['lane_name'].tolist():
+                    temp_dir = self.netdata["lane"][lane_]['movement']
+                    sorted_lane_dir = ''.join(sorted(temp_dir, key=self.custom_sort_rule))
+                    for d in sorted_lane_dir:
+                        matching_keys = int(merged_df.loc[(merged_df['lane_name'] == lane_) & (
+                                merged_df['lane_dir'] == d), 'tsl_index'].values[0])
+                        merged_df.loc[merged_df['tsl_index'] == matching_keys, 'reordered_index'] = temp_id
+                        temp_id += 1
+
+        # generate phase for this inter
+        # road_phases = {}
+        # for road in sorted_dict:
+        #     movement_temp = ""
+        #     lane = self.netdata["edge"][road]['lanes']
+        #     for l in lane:
+        #         movement_temp += self.netdata['lane'][l]["movement"]
+        #     n_r = movement_temp.count("r")
+        #     n_R = movement_temp.count("R")
+        #     n_s = movement_temp.count("s")
+        #     n_l = movement_temp.count("l")
+        #     n_L = movement_temp.count("L")
+        #     n_t = movement_temp.count("t")
+        #
+        #     l_t_phase = (n_r + n_R) * "g" + n_s * "r" + (n_l + n_L) * "G" + n_t * "g"
+        #     s_t_phase = (n_r + n_R) * "g" + n_s * "G" + (n_l + n_L) * "r" + n_t * "r"
+        #     l_s_phase = (n_r + n_R) * "g" + n_s * "G" + (n_l + n_L) * "G" + n_t * "g"
+        #     stop_phase = (n_r + n_R) * "r" + n_s * "r" + (n_l + n_L) * "r" + n_t * "r"
+        #
+        #     road_phases[road] = [l_t_phase, s_t_phase, l_s_phase, stop_phase]
+        #
+        # phase_1, phase_2, phase_3, phase_4, phase_5, phase_6, phase_7, phase_8 = "", "", "", "", "", "", "", ""
+        # for idx, road in enumerate(sorted_dict):
+        #     if len(sorted_dict) == 4:
+        #         if idx == 0 or idx == 2:
+        #             phase_1 += road_phases[road][0]
+        #             phase_2 += road_phases[road][1]
+        #             phase_3 += road_phases[road][3]
+        #             phase_4 += road_phases[road][3]
+        #             if idx == 0:
+        #                 phase_5 += road_phases[road][2]
+        #                 phase_7 += road_phases[road][3]
+        #             if idx == 2:
+        #                 phase_7 += road_phases[road][2]
+        #                 phase_5 += road_phases[road][3]
+        #             phase_6 += road_phases[road][3]
+        #             phase_8 += road_phases[road][3]
+        #         else:
+        #             phase_1 += road_phases[road][3]
+        #             phase_2 += road_phases[road][3]
+        #             phase_3 += road_phases[road][0]
+        #             phase_4 += road_phases[road][1]
+        #             if idx == 1:
+        #                 phase_6 += road_phases[road][2]
+        #                 phase_8 += road_phases[road][3]
+        #             if idx == 3:
+        #                 phase_8 += road_phases[road][2]
+        #                 phase_6 += road_phases[road][3]
+        #             phase_5 += road_phases[road][3]
+        #             phase_7 += road_phases[road][3]
+        #     elif len(sorted_dict) == 3:
+        #         phase_1 += road_phases[road][3]
+        #         phase_2 += road_phases[road][3]
+        #         phase_3 += road_phases[road][3]
+        #         phase_4 += road_phases[road][3]
+        #         phase_5 += road_phases[road][3]
+        #         if idx == 0:
+        #             phase_6 += road_phases[road][2]
+        #             phase_7 += road_phases[road][3]
+        #             phase_8 += road_phases[road][3]
+        #         if idx == 1:
+        #             phase_6 += road_phases[road][3]
+        #             phase_7 += road_phases[road][2]
+        #             phase_8 += road_phases[road][3]
+        #         if idx == 2:
+        #             phase_6 += road_phases[road][3]
+        #             phase_7 += road_phases[road][3]
+        #             phase_8 += road_phases[road][2]
+        #     else:
+        #         # TODO: duel with other type of roads
+        #         print("##### other road type !!!  ######")
+        #         phase_1 += road_phases[road][2]
+        #         phase_2 += road_phases[road][2]
+        #         phase_3 += road_phases[road][2]
+        #         phase_4 += road_phases[road][2]
+        #         phase_5 += road_phases[road][2]
+        #         phase_6 += road_phases[road][2]
+        #         phase_7 += road_phases[road][2]
+        #         phase_8 += road_phases[road][2]
+        #
+        # self.phase_inter = [phase_1, phase_2, phase_3, phase_4, phase_5, phase_6, phase_7, phase_8]
+
+        df_sorted = merged_df.sort_values('reordered_index')
+        reordered_lanes = df_sorted['lane_name'].tolist()
+        # self.reordered_tsl_index = df_sorted
+        return reordered_lanes
 
     def _build_phases(self):
         phases = self.sumo.trafficlight.getAllProgramLogics(self.id)[0].phases
         if self.env.fixed_ts:
-            self.num_green_phases = len(phases) // 2  # Number of green phases == number of phases (green+yellow) divided by 2
+            self.num_green_phases = len(
+                phases) // 2  # Number of green phases == number of phases (green+yellow) divided by 2
             return
 
         self.green_phases = []
@@ -283,9 +474,46 @@ class TrafficSignal:
         ]
         return [min(1, queue) for queue in lanes_queue]
 
+    def get_out_lanes_queue(self) -> List[float]:
+        """Returns the queue [0,1] of the vehicles in the incoming lanes of the intersection.
+
+        Obs: The queue is computed as the number of vehicles halting divided by the number of vehicles that could fit in the lane.
+        """
+        lanes_queue = [
+            self.sumo.lane.getLastStepHaltingNumber(lane)
+            / (self.lanes_length[lane] / (self.MIN_GAP + self.sumo.lane.getLastStepLength(lane)))
+            for lane in self.out_lanes
+        ]
+        return [min(1, queue) for queue in lanes_queue]
+
     def get_total_queued(self) -> int:
         """Returns the total number of vehicles halting in the intersection."""
         return sum(self.sumo.lane.getLastStepHaltingNumber(lane) for lane in self.lanes)
+
+    def get_clock_wise_lanes_density(self) -> List[float]:
+        """Returns the density [0,1] of the vehicles in all lanes of the intersection sorted clock-wise.
+
+        Obs: The density is computed as the number of vehicles divided by the number of vehicles that could fit in the lane.
+        """
+        lanes_density = [
+            self.sumo.lane.getLastStepVehicleNumber(lane)
+            / (self.lanes_length[lane] / (self.MIN_GAP + self.sumo.lane.getLastStepLength(lane)))
+            for lane in self.clock_wise_lanes
+        ]
+        return [min(1, density) for density in lanes_density]
+
+    def get_clock_wise_lanes_queue(self) -> List[float]:
+        """Returns the queue [0,1] of the vehicles in the all lanes of the intersection sorted clock-wise.
+
+        Obs: The queue is computed as the number of vehicles halting divided by the number of vehicles that could fit in the lane.
+        """
+        lanes_queue = [
+            self.sumo.lane.getLastStepHaltingNumber(lane)
+            / (self.lanes_length[lane] / (self.MIN_GAP + self.sumo.lane.getLastStepLength(lane)))
+            for lane in self.clock_wise_lanes
+        ]
+        return [min(1, queue) for queue in lanes_queue]
+
 
     def _get_veh_list(self):
         veh_list = []
@@ -311,3 +539,162 @@ class TrafficSignal:
         "queue": _queue_reward,
         "pressure": _pressure_reward,
     }
+
+
+class NetworkData:
+    def __init__(self, net_fp):
+        print(net_fp)
+        self.net = sumolib.net.readNet(net_fp)
+        ###get edge data
+        self.edge_data = self.get_edge_data(self.net)
+        self.lane_data = self.get_lane_data(self.net)
+        self.node_data, self.intersection_data = self.get_node_data(self.net)
+        print("SUCCESSFULLY GENERATED NET DATA")
+
+    def get_net_data(self):
+        return {'lane': self.lane_data, 'edge': self.edge_data, 'origin': self.find_origin_edges(),
+                'destination': self.find_destination_edges(), 'node': self.node_data, 'inter': self.intersection_data}
+
+    # inter
+    def find_destination_edges(self):
+        # next_edges = {e: 0 for e in self.edge_data}
+        next_edges = {}
+        for e in self.edge_data:
+            if self.edge_data[e]['allow']:
+                next_edges[e] = 0
+
+        for e in self.edge_data:
+            if self.edge_data[e]['allow']:
+                for next_e in self.edge_data[e]['incoming']:
+                    if self.edge_data[next_e]['allow']:
+                        next_edges[next_e] += 1
+
+        destinations = [e for e in next_edges if next_edges[e] == 0]
+        return destinations
+
+    # inter
+    def find_origin_edges(self):
+        # next_edges = {e: 0 for e in self.edge_data}
+        next_edges = {}
+        for e in self.edge_data:
+            if self.edge_data[e]['allow']:
+                next_edges[e] = 0
+
+        for e in self.edge_data:
+            for next_e in self.edge_data[e]['outgoing']:
+                next_edges[next_e] += 1
+
+        origins = [e for e in next_edges if next_edges[e] == 0]
+        return origins
+
+    # inter
+    def get_edge_data(self, net):
+        edges = net.getEdges()
+        edge_data = {str(edge.getID()): {} for edge in edges}
+
+        for edge in edges:
+            edge_ID = str(edge.getID())
+            edge_data[edge_ID]['lanes'] = [str(lane.getID()) for lane in edge.getLanes()]
+            edge_data[edge_ID]['length'] = float(edge.getLength())
+            # edge_data[edge_ID]['outgoing'] = [str(out.getID()) for out in edge.getOutgoing()]
+            edge_data[edge_ID]['outgoing'] = [str(out.getID()) for out in edge.getAllowedOutgoing("private")]
+            edge_data[edge_ID]['noutgoing'] = len(edge_data[edge_ID]['outgoing'])
+            edge_data[edge_ID]['nlanes'] = len(edge_data[edge_ID]['lanes'])
+            edge_data[edge_ID]['incoming'] = [str(inc.getID()) for inc in edge.getIncoming()]
+            edge_data[edge_ID]['outnode'] = str(edge.getFromNode().getID())
+            edge_data[edge_ID]['incnode'] = str(edge.getToNode().getID())
+            edge_data[edge_ID]['speed'] = float(edge.getSpeed())
+            edge_data[edge_ID]['allow'] = edge.allows("private")
+
+            ###coords for each edge
+            incnode_coord = edge.getFromNode().getCoord()
+            outnode_coord = edge.getToNode().getCoord()
+            edge_data[edge_ID]['coord'] = np.array(
+                [incnode_coord[0], incnode_coord[1], outnode_coord[0], outnode_coord[1]]).reshape(2, 2)
+            # print edge_data[edge_ID]['coord']
+        return edge_data
+
+    # inter
+    def get_lane_data(self, net):
+        # create lane objects from lane_ids
+        lane_ids = []
+        for edge in self.edge_data:
+            lane_ids.extend(self.edge_data[edge]['lanes'])
+
+        lanes = [net.getLane(lane) for lane in lane_ids]
+        # lane data dict
+        lane_data = {lane: {} for lane in lane_ids}
+
+        for lane in lanes:
+            lane_id = lane.getID()
+            lane_data[lane_id]['length'] = lane.getLength()
+            lane_data[lane_id]['speed'] = lane.getSpeed()
+            lane_data[lane_id]['edge'] = str(lane.getEdge().getID())
+            # lane_data[ lane_id ]['outgoing'] = []
+            lane_data[lane_id]['outgoing'] = {}
+            ###.getOutgoing() returns a Connection type, which we use to determine the next lane
+            moveid = []
+            for conn in lane.getOutgoing():
+                out_id = str(conn.getToLane().getID())
+                lane_data[lane_id]['outgoing'][out_id] = {'dir': str(conn.getDirection()),
+                                                          'index': conn.getTLLinkIndex()}
+                moveid.append(str(conn.getDirection()))
+            lane_data[lane_id]['movement'] = ''.join(sorted(moveid))
+            # create empty list for incoming lanes
+            lane_data[lane_id]['incoming'] = []
+
+        # determine incoming lanes using outgoing lanes data
+        for lane in lane_data:
+            for inc in lane_data:
+                if lane == inc:
+                    continue
+                else:
+                    if inc in lane_data[lane]['outgoing']:
+                        lane_data[inc]['incoming'].append(lane)
+
+        return lane_data
+
+    # inter
+    def get_node_data(self, net):
+        # read network from .netfile
+        nodes = net.getNodes()
+        node_data = {node.getID(): {} for node in nodes}
+
+        for node in nodes:
+            node_id = node.getID()
+            # get incoming/outgoing edge
+            node_data[node_id]['incoming'] = set(str(edge.getID()) for edge in node.getIncoming())
+            node_data[node_id]['outgoing'] = set(str(edge.getID()) for edge in node.getOutgoing())
+            node_data[node_id]['tlsindex'] = {conn.getTLLinkIndex(): str(conn.getFromLane().getID()) for conn in
+                                              node.getConnections()}
+            node_data[node_id]['tlsindexdir'] = {conn.getTLLinkIndex(): str(conn.getDirection()) for conn in
+                                                 node.getConnections()}
+
+            if node_id == '-13968':
+                print("##### what is -13968 ????")
+                missing = []
+                negative = []
+                for i in range(len(node_data[node_id]['tlsindex'])):
+                    if i not in node_data[node_id]['tlsindex']:
+                        missing.append(i)
+
+                for k in node_data[node_id]['tlsindex']:
+                    if k < 0:
+                        negative.append(k)
+
+                for m, n in zip(missing, negative):
+                    node_data[node_id]['tlsindex'][m] = node_data[node_id]['tlsindex'][n]
+                    del node_data[node_id]['tlsindex'][n]
+                    # for index dir
+                    node_data[node_id]['tlsindexdir'][m] = node_data[node_id]['tlsindexdir'][n]
+                    del node_data[node_id]['tlsindexdir'][n]
+
+            # get XY coords
+            pos = node.getCoord()
+            node_data[node_id]['x'] = pos[0]
+            node_data[node_id]['y'] = pos[1]
+
+        intersection_data = {str(node): node_data[node] for node in node_data if
+                             "traffic_light" in net.getNode(node).getType()}
+
+        return node_data, intersection_data

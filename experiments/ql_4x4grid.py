@@ -4,6 +4,10 @@ import sys
 
 import pandas as pd
 
+# add parent path to sys.path
+current_path = os.path.abspath(os.path.dirname(__file__))
+parent_path = os.path.dirname(current_path)
+sys.path.append(parent_path)
 
 if "SUMO_HOME" in os.environ:
     tools = os.path.join(os.environ["SUMO_HOME"], "tools")
@@ -15,7 +19,6 @@ from sumo_rl import SumoEnvironment
 from sumo_rl.agents import QLAgent
 from sumo_rl.exploration import EpsilonGreedy
 
-
 if __name__ == "__main__":
     alpha = 0.1
     gamma = 0.99
@@ -24,9 +27,9 @@ if __name__ == "__main__":
     episodes = 4
 
     env = SumoEnvironment(
-        net_file="nets/4x4-Lucas/4x4.net.xml",
-        route_file="nets/4x4-Lucas/4x4c1c2c1c2.rou.xml",
-        use_gui=False,
+        net_file=parent_path + "/nets/4x4-Lucas/4x4.net.xml",
+        route_file=parent_path + "/nets/4x4-Lucas/4x4c1c2c1c2.rou.xml",
+        use_gui=True,
         num_seconds=80000,
         min_green=5,
         delta_time=5,

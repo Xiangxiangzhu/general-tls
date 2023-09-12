@@ -4,6 +4,10 @@ import sys
 import gymnasium as gym
 from stable_baselines3.dqn.dqn import DQN
 
+# add parent path to sys.path
+current_path = os.path.abspath(os.path.dirname(__file__))
+parent_path = os.path.dirname(current_path)
+sys.path.append(parent_path)
 
 if "SUMO_HOME" in os.environ:
     tools = os.path.join(os.environ["SUMO_HOME"], "tools")
@@ -17,8 +21,8 @@ from sumo_rl import SumoEnvironment
 
 if __name__ == "__main__":
     env = SumoEnvironment(
-        net_file="nets/2way-single-intersection/single-intersection.net.xml",
-        route_file="nets/2way-single-intersection/single-intersection-vhvh.rou.xml",
+        net_file=parent_path + "/nets/2way-single-intersection/single-intersection.net.xml",
+        route_file=parent_path + "/nets/2way-single-intersection/single-intersection-vhvh.rou.xml",
         out_csv_name="outputs/2way-single-intersection/dqn",
         single_agent=True,
         use_gui=True,
