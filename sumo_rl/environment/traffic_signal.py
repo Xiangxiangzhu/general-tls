@@ -95,8 +95,6 @@ class TrafficSignal:
 
         self.observation_fn = self.env.observation_class(self)
 
-        self._build_phases()
-
         self.lanes = list(
             dict.fromkeys(self.sumo.trafficlight.getControlledLanes(self.id))
         )  # Remove duplicates and keep order
@@ -109,6 +107,9 @@ class TrafficSignal:
         nd = NetworkData(self.env._net)
         self.netdata = nd.get_net_data()
         self.clock_wise_lanes = self._reshape_index()
+
+        # build all green phases and yellow phases
+        self._build_phases()
 
         self.observation_space = self.observation_fn.observation_space()
         self.action_space = spaces.Discrete(self.num_green_phases)
@@ -128,6 +129,7 @@ class TrafficSignal:
         # reorder incoming roads
         self.all_roads = [self.netdata['lane'][lane]["edge"] for lane in self.all_lanes]
         self.all_roads = list(set(self.all_roads))
+        self.incoming_roads = [self.netdata['lane'][lane]["edge"] for lane in self.lanes]
 
         heading = {}
         for road in self.all_roads:
@@ -143,7 +145,7 @@ class TrafficSignal:
             heading[road] = adjusted_degrees
 
         sorted_heading = sorted(heading.items(), key=itemgetter(1))
-        sorted_dict = {k: v for k, v in sorted_heading}
+        self.sorted_dict = {k: v for k, v in sorted_heading}
 
         # create tsc index Dataframe : merged_df
 
@@ -167,6 +169,7 @@ class TrafficSignal:
 
         # concatenate DataFrame
         merged_df = pd.concat([df1, df2['lane_dir']], axis=1)
+        self.merged_df = merged_df
 
         def is_consecutive_increment(sequence):
             n = len(sequence)
@@ -186,7 +189,7 @@ class TrafficSignal:
 
         # reorder tsc index
         temp_id = min(self.tsl_index_origin)
-        for road in sorted_dict:
+        for road in self.sorted_dict:
             lane_reverse = False
             lane_list = self.netdata["edge"][road]["lanes"]
             if "r" in self.netdata["lane"][lane_list[0]]['movement'] or "l" in self.netdata["lane"][lane_list[-1]][
@@ -207,106 +210,109 @@ class TrafficSignal:
                         merged_df.loc[merged_df['tsl_index'] == matching_keys, 'reordered_index'] = temp_id
                         temp_id += 1
 
-        # generate phase for this inter
-        # road_phases = {}
-        # for road in sorted_dict:
-        #     movement_temp = ""
-        #     lane = self.netdata["edge"][road]['lanes']
-        #     for l in lane:
-        #         movement_temp += self.netdata['lane'][l]["movement"]
-        #     n_r = movement_temp.count("r")
-        #     n_R = movement_temp.count("R")
-        #     n_s = movement_temp.count("s")
-        #     n_l = movement_temp.count("l")
-        #     n_L = movement_temp.count("L")
-        #     n_t = movement_temp.count("t")
-        #
-        #     l_t_phase = (n_r + n_R) * "g" + n_s * "r" + (n_l + n_L) * "G" + n_t * "g"
-        #     s_t_phase = (n_r + n_R) * "g" + n_s * "G" + (n_l + n_L) * "r" + n_t * "r"
-        #     l_s_phase = (n_r + n_R) * "g" + n_s * "G" + (n_l + n_L) * "G" + n_t * "g"
-        #     stop_phase = (n_r + n_R) * "r" + n_s * "r" + (n_l + n_L) * "r" + n_t * "r"
-        #
-        #     road_phases[road] = [l_t_phase, s_t_phase, l_s_phase, stop_phase]
-        #
-        # phase_1, phase_2, phase_3, phase_4, phase_5, phase_6, phase_7, phase_8 = "", "", "", "", "", "", "", ""
-        # for idx, road in enumerate(sorted_dict):
-        #     if len(sorted_dict) == 4:
-        #         if idx == 0 or idx == 2:
-        #             phase_1 += road_phases[road][0]
-        #             phase_2 += road_phases[road][1]
-        #             phase_3 += road_phases[road][3]
-        #             phase_4 += road_phases[road][3]
-        #             if idx == 0:
-        #                 phase_5 += road_phases[road][2]
-        #                 phase_7 += road_phases[road][3]
-        #             if idx == 2:
-        #                 phase_7 += road_phases[road][2]
-        #                 phase_5 += road_phases[road][3]
-        #             phase_6 += road_phases[road][3]
-        #             phase_8 += road_phases[road][3]
-        #         else:
-        #             phase_1 += road_phases[road][3]
-        #             phase_2 += road_phases[road][3]
-        #             phase_3 += road_phases[road][0]
-        #             phase_4 += road_phases[road][1]
-        #             if idx == 1:
-        #                 phase_6 += road_phases[road][2]
-        #                 phase_8 += road_phases[road][3]
-        #             if idx == 3:
-        #                 phase_8 += road_phases[road][2]
-        #                 phase_6 += road_phases[road][3]
-        #             phase_5 += road_phases[road][3]
-        #             phase_7 += road_phases[road][3]
-        #     elif len(sorted_dict) == 3:
-        #         phase_1 += road_phases[road][3]
-        #         phase_2 += road_phases[road][3]
-        #         phase_3 += road_phases[road][3]
-        #         phase_4 += road_phases[road][3]
-        #         phase_5 += road_phases[road][3]
-        #         if idx == 0:
-        #             phase_6 += road_phases[road][2]
-        #             phase_7 += road_phases[road][3]
-        #             phase_8 += road_phases[road][3]
-        #         if idx == 1:
-        #             phase_6 += road_phases[road][3]
-        #             phase_7 += road_phases[road][2]
-        #             phase_8 += road_phases[road][3]
-        #         if idx == 2:
-        #             phase_6 += road_phases[road][3]
-        #             phase_7 += road_phases[road][3]
-        #             phase_8 += road_phases[road][2]
-        #     else:
-        #         # TODO: duel with other type of roads
-        #         print("##### other road type !!!  ######")
-        #         phase_1 += road_phases[road][2]
-        #         phase_2 += road_phases[road][2]
-        #         phase_3 += road_phases[road][2]
-        #         phase_4 += road_phases[road][2]
-        #         phase_5 += road_phases[road][2]
-        #         phase_6 += road_phases[road][2]
-        #         phase_7 += road_phases[road][2]
-        #         phase_8 += road_phases[road][2]
-        #
-        # self.phase_inter = [phase_1, phase_2, phase_3, phase_4, phase_5, phase_6, phase_7, phase_8]
-
         df_sorted = merged_df.sort_values('reordered_index')
         reordered_lanes = df_sorted['lane_name'].tolist()
         # self.reordered_tsl_index = df_sorted
         return reordered_lanes
 
-    def _build_phases(self):
-        phases = self.sumo.trafficlight.getAllProgramLogics(self.id)[0].phases
-        if self.env.fixed_ts:
-            self.num_green_phases = len(
-                phases) // 2  # Number of green phases == number of phases (green+yellow) divided by 2
-            return
+    def _build_green_phases(self):
+        # generate phase for this inter
+        road_phases = {}
 
-        self.green_phases = []
+        self.sorted_incoming_roads = {}
+        for r in self.sorted_dict:
+            if r in self.incoming_roads:
+                self.sorted_incoming_roads[r] = self.sorted_dict[r]
+
+        for road in self.sorted_incoming_roads:
+            if road in self.incoming_roads:
+                movement_temp = ""
+                lane = self.netdata["edge"][road]['lanes']
+                for l in lane:
+                    movement_temp += self.netdata['lane'][l]["movement"]
+                n_r = movement_temp.count("r")
+                n_R = movement_temp.count("R")
+                n_s = movement_temp.count("s")
+                n_l = movement_temp.count("l")
+                n_L = movement_temp.count("L")
+                n_t = movement_temp.count("t")
+
+                l_t_phase = (n_r + n_R) * "g" + n_s * "r" + (n_l + n_L) * "G" + n_t * "g"
+                s_t_phase = (n_r + n_R) * "g" + n_s * "G" + (n_l + n_L) * "r" + n_t * "r"
+                l_s_phase = (n_r + n_R) * "g" + n_s * "G" + (n_l + n_L) * "G" + n_t * "g"
+                stop_phase = (n_r + n_R) * "r" + n_s * "r" + (n_l + n_L) * "r" + n_t * "r"
+
+                road_phases[road] = [l_t_phase, s_t_phase, l_s_phase, stop_phase]
+
+        phase_1, phase_2, phase_3, phase_4, phase_5, phase_6, phase_7, phase_8 = "", "", "", "", "", "", "", ""
+        for idx, road in enumerate(self.sorted_incoming_roads):
+            if len(self.sorted_incoming_roads) == 4:
+                if idx == 0 or idx == 2:
+                    phase_1 += road_phases[road][0]
+                    phase_2 += road_phases[road][1]
+                    phase_3 += road_phases[road][3]
+                    phase_4 += road_phases[road][3]
+                    if idx == 0:
+                        phase_5 += road_phases[road][2]
+                        phase_7 += road_phases[road][3]
+                    if idx == 2:
+                        phase_7 += road_phases[road][2]
+                        phase_5 += road_phases[road][3]
+                    phase_6 += road_phases[road][3]
+                    phase_8 += road_phases[road][3]
+                else:
+                    phase_1 += road_phases[road][3]
+                    phase_2 += road_phases[road][3]
+                    phase_3 += road_phases[road][0]
+                    phase_4 += road_phases[road][1]
+                    if idx == 1:
+                        phase_6 += road_phases[road][2]
+                        phase_8 += road_phases[road][3]
+                    if idx == 3:
+                        phase_8 += road_phases[road][2]
+                        phase_6 += road_phases[road][3]
+                    phase_5 += road_phases[road][3]
+                    phase_7 += road_phases[road][3]
+            elif len(self.sorted_incoming_roads) == 3:
+                phase_1 += road_phases[road][3]
+                phase_2 += road_phases[road][3]
+                phase_3 += road_phases[road][3]
+                phase_4 += road_phases[road][3]
+                phase_5 += road_phases[road][3]
+                if idx == 0:
+                    phase_6 += road_phases[road][2]
+                    phase_7 += road_phases[road][3]
+                    phase_8 += road_phases[road][3]
+                if idx == 1:
+                    phase_6 += road_phases[road][3]
+                    phase_7 += road_phases[road][2]
+                    phase_8 += road_phases[road][3]
+                if idx == 2:
+                    phase_6 += road_phases[road][3]
+                    phase_7 += road_phases[road][3]
+                    phase_8 += road_phases[road][2]
+            else:
+                # TODO: duel with other type of roads
+                print("##### other road type !!!  ######")
+                phase_1 += road_phases[road][2]
+                phase_2 += road_phases[road][2]
+                phase_3 += road_phases[road][2]
+                phase_4 += road_phases[road][2]
+                phase_5 += road_phases[road][2]
+                phase_6 += road_phases[road][2]
+                phase_7 += road_phases[road][2]
+                phase_8 += road_phases[road][2]
+
+        self.phase_inter = [phase_1, phase_2, phase_3, phase_4, phase_5, phase_6, phase_7, phase_8]
+        self.regulated_green_phases = [self.sumo.trafficlight.Phase(60, phase) for phase in self.phase_inter]
+        return self.regulated_green_phases
+
+    def _build_phases(self):
+        temp_phases = self.sumo.trafficlight.getAllProgramLogics(self.id)
+        phases = self.sumo.trafficlight.getAllProgramLogics(self.id)[0].phases
+
         self.yellow_dict = {}
-        for phase in phases:
-            state = phase.state
-            if "y" not in state and (state.count("r") + state.count("s") != len(state)):
-                self.green_phases.append(self.sumo.trafficlight.Phase(60, state))
+        self.green_phases = self._build_green_phases()
         self.num_green_phases = len(self.green_phases)
         self.all_phases = self.green_phases.copy()
 
@@ -513,7 +519,6 @@ class TrafficSignal:
             for lane in self.clock_wise_lanes
         ]
         return [min(1, queue) for queue in lanes_queue]
-
 
     def _get_veh_list(self):
         veh_list = []
