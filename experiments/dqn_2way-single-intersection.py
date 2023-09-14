@@ -1,6 +1,10 @@
 import os
 import sys
 
+# import gym
+import numpy as np
+from gym import spaces
+from sumo_rl import SumoEnvironment
 import gymnasium as gym
 from stable_baselines3.dqn.dqn import DQN
 
@@ -14,9 +18,53 @@ if "SUMO_HOME" in os.environ:
     sys.path.append(tools)
 else:
     sys.exit("Please declare the environment variable 'SUMO_HOME'")
-import traci
 
-from sumo_rl import SumoEnvironment
+
+class ActionMaskWrapper(gym.Wrapper):
+    def __init__(self, env):
+        super(ActionMaskWrapper, self).__init__(env)
+        self.action_space = env.action_space
+        self.observation_space = env.observation_space
+
+    def reset(self, seed=None, **kwargs):
+        obs = self.env.reset()
+        action_mask = self.compute_action_mask()
+        # return {'observation': obs, 'action_mask': action_mask}
+        return obs
+
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        action_mask = self.compute_action_mask()
+        return {'observation': obs, 'action_mask': action_mask}, reward, done, info
+
+    def compute_action_mask(self):
+        # Implement your logic to compute the action mask based on the current state of the environment
+        # For example:
+        mask = np.ones(self.action_space.n)
+        # mask[invalid_action_indices] = 0
+        return mask
+
+
+from stable_baselines3.dqn.policies import DQNPolicy
+
+import torch as th
+
+
+class MaskedDQNPolicy(DQNPolicy):
+    def _predict(self, obs, deterministic=True) -> th.Tensor:
+        # Assuming the last part of the observation tensor is the action mask
+        # and the rest is the actual observation. Adjust as per your implementation.
+        if not isinstance(obs, dict):
+            return super()._predict(obs, deterministic=deterministic)
+
+        action_mask, actual_obs = obs['action_mask'], obs['observation']
+        # Get Q-values from the parent class
+        q_values = super()._predict(actual_obs, deterministic=deterministic)
+
+        # Mask invalid actions by setting their Q-values to a large negative number
+        q_values[action_mask == 0] = float('-inf')
+
+        return q_values
 
 
 if __name__ == "__main__":
@@ -28,10 +76,11 @@ if __name__ == "__main__":
         use_gui=True,
         num_seconds=100000,
     )
+    # env = ActionMaskWrapper(env)
 
     model = DQN(
         env=env,
-        policy="MlpPolicy",
+        policy="MlpPolicy",  # "MlpPolicy", MaskedDQNPolicy
         learning_rate=0.001,
         learning_starts=0,
         train_freq=1,

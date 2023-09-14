@@ -170,6 +170,7 @@ class SumoEnvironment(gym.Env):
             }
 
         conn.close()
+        self.action_mask = self._compute_action_mask()
 
         self.vehicles = dict()
         self.reward_range = (-float("inf"), float("inf"))
@@ -304,9 +305,16 @@ class SumoEnvironment(gym.Env):
         info = self._compute_info()
 
         if self.single_agent:
-            return observations[self.ts_ids[0]], rewards[self.ts_ids[0]], terminated, truncated, info
+            aa = self.ts_ids[0]
+            aaa = {observations[self.ts_ids[0]]}
+            aaaa = rewards[self.ts_ids[0]]
+            bb = terminated
+            bbb = truncated
+            cc = info
+
+            return {observations[self.ts_ids[0]]}, rewards[self.ts_ids[0]], terminated, truncated, info
         else:
-            return observations, rewards, dones, info
+            return {observations}, rewards, dones, info
 
     def _run_steps(self):
         time_to_act = False
@@ -473,3 +481,10 @@ class SumoEnvironment(gym.Env):
 
     def _discretize_density(self, density):
         return min(int(density * 10), 9)
+
+    def _compute_action_mask(self):
+        # Implement your logic to compute the action mask based on the current state of the environment
+        # For example:
+        mask = np.ones(self.action_space.n)
+        # mask[invalid_action_indices] = 0
+        return mask
