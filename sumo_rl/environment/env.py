@@ -305,16 +305,9 @@ class SumoEnvironment(gym.Env):
         info = self._compute_info()
 
         if self.single_agent:
-            aa = self.ts_ids[0]
-            aaa = {observations[self.ts_ids[0]]}
-            aaaa = rewards[self.ts_ids[0]]
-            bb = terminated
-            bbb = truncated
-            cc = info
-
-            return {observations[self.ts_ids[0]]}, rewards[self.ts_ids[0]], terminated, truncated, info
+            return observations[self.ts_ids[0]], rewards[self.ts_ids[0]], terminated, truncated, info
         else:
-            return {observations}, rewards, dones, info
+            return observations, rewards, dones, info
 
     def _run_steps(self):
         time_to_act = False
