@@ -265,8 +265,8 @@ class TrafficSignal:
         return self.regulated_green_phases
 
     def _build_phases(self):
-        temp_phases = self.sumo.trafficlight.getAllProgramLogics(self.id)
-        phases = self.sumo.trafficlight.getAllProgramLogics(self.id)[0].phases
+        # temp_phases = self.sumo.trafficlight.getAllProgramLogics(self.id)
+        # phases = self.sumo.trafficlight.getAllProgramLogics(self.id)[0].phases
 
         self.yellow_dict = {}
         self.green_phases = self._build_green_phases()

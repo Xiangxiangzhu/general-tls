@@ -170,7 +170,6 @@ class SumoEnvironment(gym.Env):
             }
 
         conn.close()
-        self.action_mask = self._compute_action_mask()
 
         self.vehicles = dict()
         self.reward_range = (-float("inf"), float("inf"))
@@ -474,10 +473,3 @@ class SumoEnvironment(gym.Env):
 
     def _discretize_density(self, density):
         return min(int(density * 10), 9)
-
-    def _compute_action_mask(self):
-        # Implement your logic to compute the action mask based on the current state of the environment
-        # For example:
-        mask = np.ones(self.action_space.n)
-        # mask[invalid_action_indices] = 0
-        return mask
