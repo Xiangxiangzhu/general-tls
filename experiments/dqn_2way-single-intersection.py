@@ -41,13 +41,10 @@ if __name__ == "__main__":
         def _predict(self, obs: th.Tensor, deterministic: bool = True) -> th.Tensor:
             q_values = self.q_net(obs)
 
-            # Build action mask
-            action_mask = th.ones(self.action_space.n, device=q_values.device)
-            action_mask[0:7] = 0
+            action_mask = self.observation_space.my_action_mask.to(q_values.device)
             q_values[:, action_mask == 0] = float('-inf')
 
             action = q_values.argmax(dim=1).reshape(-1)
-            print("action is ", action)
             return action
 
 

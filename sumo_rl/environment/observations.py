@@ -5,6 +5,12 @@ import numpy as np
 from gymnasium import spaces
 
 from .traffic_signal import TrafficSignal
+import torch as th
+
+
+class MyBox(spaces.Box):
+    def set_action_mask(self, action_mask):
+        self.my_action_mask = action_mask
 
 
 class ObservationFunction:
@@ -43,10 +49,18 @@ class DefaultObservationFunction(ObservationFunction):
 
     def observation_space(self) -> spaces.Box:
         """Return the observation space."""
-        return spaces.Box(
+        obs_space = MyBox(
             low=np.zeros(self.ts.num_green_phases + 1 + 2 * len(self.ts.lanes), dtype=np.float32),
             high=np.ones(self.ts.num_green_phases + 1 + 2 * len(self.ts.lanes), dtype=np.float32),
         )
+        action_mask = th.ones(8)
+        if len(self.ts.sorted_incoming_roads) == 3:
+            action_mask[0:5] = 0
+        elif len(self.ts.sorted_incoming_roads) == 2:
+            action_mask[0:4] = 0
+            action_mask[6:8] = 0
+        obs_space.set_action_mask(action_mask)
+        return obs_space
 
 
 class FullAttachObservationFunction(ObservationFunction):
