@@ -10,7 +10,7 @@
     </input>
 
     <output>
-        <output-file value="/home/lucas/Documents/sumo-rl/nets/single-intersection/single-intersection2.net.xml"/>
+        <output-file value="/home/lucas/Documents/sumo-general-rl/nets/single-intersection/single-intersection2.net.xml"/>
     </output>
 
     <processing>

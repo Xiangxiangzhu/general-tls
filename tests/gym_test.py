@@ -1,12 +1,12 @@
 import gymnasium as gym
 from gymnasium.utils.env_checker import check_env
 
-import sumo_rl
+import src
 
 
 def test_api():
     env = gym.make(
-        "sumo-rl-v0",
+        "sumo-general-rl-v0",
         num_seconds=100,
         use_gui=False,
         net_file="nets/single-intersection/single-intersection.net.xml",

@@ -1,10 +1,10 @@
 from pettingzoo.test import api_test, parallel_api_test
 
-import sumo_rl
+import src
 
 
 def test_api():
-    env = sumo_rl.env(
+    env = src.env(
         net_file="nets/4x4-Lucas/4x4.net.xml",
         route_file="nets/4x4-Lucas/4x4c1c2c1c2.rou.xml",
         out_csv_name="outputs/4x4grid/test",
@@ -16,7 +16,7 @@ def test_api():
 
 
 def test_parallel_api():
-    env = sumo_rl.parallel_env(
+    env = src.parallel_env(
         net_file="nets/4x4-Lucas/4x4.net.xml",
         route_file="nets/4x4-Lucas/4x4c1c2c1c2.rou.xml",
         out_csv_name="outputs/4x4grid/test",

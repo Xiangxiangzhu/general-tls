@@ -1,11 +1,7 @@
 import os
 import sys
 
-# import gym
-import numpy as np
-# from gym import spaces
-from typing import Any, Dict, List, Optional, Tuple, Type, TypeVar, Union
-from sumo_rl import SumoEnvironment
+from src import SumoEnvironment
 import gymnasium as gym
 from gymnasium import spaces
 from stable_baselines3.dqn.dqn import DQN
@@ -15,15 +11,13 @@ current_path = os.path.abspath(os.path.dirname(__file__))
 parent_path = os.path.dirname(current_path)
 sys.path.append(parent_path)
 
+from src.policy.masked_policy import MaskedDQNPolicy
+
 if "SUMO_HOME" in os.environ:
     tools = os.path.join(os.environ["SUMO_HOME"], "tools")
     sys.path.append(tools)
 else:
     sys.exit("Please declare the environment variable 'SUMO_HOME'")
-
-from stable_baselines3.dqn.policies import DQNPolicy
-
-import torch as th
 
 if __name__ == "__main__":
     env = SumoEnvironment(
@@ -34,19 +28,6 @@ if __name__ == "__main__":
         use_gui=True,
         num_seconds=100000,
     )
-
-
-    class MaskedDQNPolicy(DQNPolicy):
-
-        def _predict(self, obs: th.Tensor, deterministic: bool = True) -> th.Tensor:
-            q_values = self.q_net(obs)
-
-            action_mask = self.observation_space.my_action_mask.to(q_values.device)
-            q_values[:, action_mask == 0] = float('-inf')
-
-            action = q_values.argmax(dim=1).reshape(-1)
-            return action
-
 
     model = DQN(
         env=env,
