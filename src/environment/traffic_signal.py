@@ -106,6 +106,14 @@ class TrafficSignal:
 
         nd = NetworkData(self.env._net)
         self.netdata = nd.get_net_data()
+
+        # reorder incoming roads
+        self.all_roads = [self.netdata['lane'][lane]["edge"] for lane in self.all_lanes]
+        self.all_roads = list(set(self.all_roads))
+        self.incoming_roads = [self.netdata['lane'][lane]["edge"] for lane in self.lanes]
+        self.incoming_roads = list(set(self.incoming_roads))
+
+        # sort tls controlled lanes in clock wise
         self.clock_wise_lanes = self._reshape_index()
 
         # build all green phases and yellow phases
@@ -123,18 +131,14 @@ class TrafficSignal:
     def _reshape_index(self):
         print("##### reshaped lane tsc index #####")
 
-        # incoming_roads = self.netdata["inter"][self.id]["incoming"]
-        # incoming_roads = [r for r in self.netdata['inter'][self.id]['incoming']]
-
-        # reorder incoming roads
-        self.all_roads = [self.netdata['lane'][lane]["edge"] for lane in self.all_lanes]
-        self.all_roads = list(set(self.all_roads))
-        self.incoming_roads = [self.netdata['lane'][lane]["edge"] for lane in self.lanes]
-
         heading = {}
         for road in self.all_roads:
-            road_from = self.netdata['edge'][road]['coord'][0]
-            road_to = self.netdata['edge'][road]['coord'][1]
+            if road in self.incoming_roads:
+                road_from = self.netdata['edge'][road]['coord'][0]
+                road_to = self.netdata['edge'][road]['coord'][1]
+            else:
+                road_from = self.netdata['edge'][road]['coord'][1]
+                road_to = self.netdata['edge'][road]['coord'][0]
             angle_x = road_from[0] - road_to[0]
             angle_y = road_from[1] - road_to[1]
             theta = math.atan2(angle_y, angle_x)
@@ -147,8 +151,14 @@ class TrafficSignal:
         sorted_heading = sorted(heading.items(), key=itemgetter(1))
         self.sorted_dict = {k: v for k, v in sorted_heading}
 
-        # create tsc index Dataframe : merged_df
+        sorted_road_data = sorted(
+            sorted_heading,
+            key=lambda x: (x[1], -self.incoming_roads.index(x[0]) if x[0] in self.incoming_roads else float('inf'))
+        )
+        self.clock_wise_all_roads = [item[0] for item in sorted_road_data]
+        self.clock_wise_incoming_roads = [item for item in self.clock_wise_all_roads if item in self.incoming_roads]
 
+        # create tsc index Dataframe : merged_df
         tls_index = self.netdata["inter"][self.id]["tlsindex"]
         tls_index_dir = self.netdata["inter"][self.id]["tlsindexdir"]
 
@@ -425,6 +435,18 @@ class TrafficSignal:
         ]
         return [min(1, density) for density in lanes_density]
 
+    def get_lanes_density_fn(self, lanes) -> List[float]:
+        """Returns the density [0,1] of the vehicles in the incoming lanes of the intersection.
+
+        Obs: The density is computed as the number of vehicles divided by the number of vehicles that could fit in the lane.
+        """
+        lanes_density = [
+            self.sumo.lane.getLastStepVehicleNumber(lane)
+            / (self.lanes_length[lane] / (self.MIN_GAP + self.sumo.lane.getLastStepLength(lane)))
+            for lane in lanes
+        ]
+        return [min(1, density) for density in lanes_density]
+
     def get_lanes_queue(self) -> List[float]:
         """Returns the queue [0,1] of the vehicles in the incoming lanes of the intersection.
 
@@ -434,6 +456,14 @@ class TrafficSignal:
             self.sumo.lane.getLastStepHaltingNumber(lane)
             / (self.lanes_length[lane] / (self.MIN_GAP + self.sumo.lane.getLastStepLength(lane)))
             for lane in self.lanes
+        ]
+        return [min(1, queue) for queue in lanes_queue]
+
+    def get_lanes_queue_fn(self, lanes) -> List[float]:
+        lanes_queue = [
+            self.sumo.lane.getLastStepHaltingNumber(lane)
+            / (self.lanes_length[lane] / (self.MIN_GAP + self.sumo.lane.getLastStepLength(lane)))
+            for lane in lanes
         ]
         return [min(1, queue) for queue in lanes_queue]
 

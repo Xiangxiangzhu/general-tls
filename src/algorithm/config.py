@@ -17,9 +17,9 @@ config = {
     # ==========  env config ==========
     'net_file': "/nets/4x4-Lucas/4x4.net.xml",
     'route_file': "/nets/4x4-Lucas/4x4c1c2c1c2.rou.xml",
-    'use_gui': False,
+    'use_gui': True,
     'delta_time': 5,
-    'metric_period': 3,  # 3600
+    'metric_period': 3600,  # 3600
     'min_green': 5,
 
     # ==========  learner config ==========

@@ -49,18 +49,13 @@ def log_metrics(summary, datas, buffer_total_size):
 
 
 if __name__ == "__main__":
-    alpha = 0.1
-    gamma = 0.99
-    decay = 1
-    runs = 30
-    episodes = 4
 
     env = SumoEnvironment(
         net_file=parent_path + config['net_file'],
         route_file=parent_path + config['route_file'],
         use_gui=config['use_gui'],
         min_green=config['min_green'],
-        delta_time=config['metric_period'],
+        delta_time=config['delta_time'],
     )
 
     _, obs_dim = next(iter(env.traffic_signals.items()))
@@ -114,6 +109,7 @@ if __name__ == "__main__":
                 # conduct action per delta_time second
                 step_count += 1
                 next_obs, rewards, dones, _ = env.step(actions)
+                # print("###### action is ", actions)
                 rewards_list.append(rewards)
 
                 # Use defaultdict to accumulate sums
