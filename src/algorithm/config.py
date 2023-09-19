@@ -14,17 +14,13 @@
 
 config = {
 
-    # # ==========  env config ==========
-    # 'config_path_name':
-    #     './examples/config.json',  # note that the path of the data can be modified in the json file.
-    # 'thread_num': 1,
-    # 'obs_fns': ['lane_count'],
-    # 'reward_fns': ['pressure'],
-    # 'is_only': False,
-    # 'average': None,
-    'action_interval': 1,
+    # ==========  env config ==========
+    'net_file': "/nets/4x4-Lucas/4x4.net.xml",
+    'route_file': "/nets/4x4-Lucas/4x4c1c2c1c2.rou.xml",
+    'use_gui': False,
+    'delta_time': 5,
     'metric_period': 3600,  # 3600
-    # 'yellow_phase_time': 5,
+    'min_green': 5,
 
     # ==========  learner config ==========
     'gamma': 0.85,  # also can be set to 0.95
@@ -32,7 +28,7 @@ config = {
     'epsilon_min': 0.2,
     'epsilon_decay': 0.99,
     'start_lr': 0.00025,
-    'episodes': 200 + 100,
+    'episodes': 5,
     'algo': 'DQN',  # DQN
     'max_train_steps': int(1e6),
     'lr_decay_interval': 100,

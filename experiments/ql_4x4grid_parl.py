@@ -56,12 +56,11 @@ if __name__ == "__main__":
     episodes = 4
 
     env = SumoEnvironment(
-        net_file=parent_path + "/nets/4x4-Lucas/4x4.net.xml",
-        route_file=parent_path + "/nets/4x4-Lucas/4x4c1c2c1c2.rou.xml",
-        use_gui=True,
-        num_seconds=80000,
-        min_green=5,
-        delta_time=5,
+        net_file=parent_path + config['net_file'],
+        route_file=parent_path + config['route_file'],
+        use_gui=config['use_gui'],
+        min_green=config['min_green'],
+        delta_time=config['metric_period'],
     )
 
     _, obs_dim = next(iter(env.traffic_signals.items()))
@@ -80,7 +79,8 @@ if __name__ == "__main__":
     ql_agents = {
         ts: Agent(
             algorithm,
-            config
+            config,
+            env.traffic_signals[ts]
         )
         for algorithm, ts in zip(algorithms, env.ts_ids)
     }
@@ -88,6 +88,7 @@ if __name__ == "__main__":
     episode_count = 0
     step_forward = 0
     episodes_rewards = {}
+
     summarys = [
         SummaryWriter(os.path.join(config['train_log_dir'], str(agent_id)))
         for agent_id in range(n_agents)
@@ -97,7 +98,6 @@ if __name__ == "__main__":
         ReplayMemory(config['memory_size'], obs_dim, 0)
         for i in range(n_agents)
     ]
-
     obs = env.reset()
 
     with tqdm(total=config['episodes'], desc='[Training Model]') as pbar:
@@ -110,12 +110,12 @@ if __name__ == "__main__":
                     action = ql_agents[agent_id].sample(ob)
                     actions[agent_id] = action[0]
                 rewards_list = []
-                for _ in range(config['action_interval']):
-                    step_count += 1
-                    next_obs, rewards, dones, _ = env.step(actions)
-                    rewards_list.append(rewards)
 
-                #######
+                # conduct action per delta_time second
+                step_count += 1
+                next_obs, rewards, dones, _ = env.step(actions)
+                rewards_list.append(rewards)
+
                 # Use defaultdict to accumulate sums
                 sums = defaultdict(int)
                 # Count the number of dictionaries for each key
@@ -129,7 +129,6 @@ if __name__ == "__main__":
                 # Calculate averages
                 rewards = {key: total / (counts[key] * config['reward_normal_factor']) for key, total in sums.items()}
 
-                # calc the episodes_rewards and will add it to the tensorboard
                 # Update episodes_rewards with rewards
                 for key, value in rewards.items():
                     if key in episodes_rewards:
@@ -168,18 +167,20 @@ if __name__ == "__main__":
                                 .format(episode_count, step_count, len(replay_buffers[0]), step_forward))
 
             episode_count += 1
-            avg_travel_time = env.world.eng.get_average_travel_time()
             obs = env.reset()
-            for agent_id, summary in enumerate(summarys):
-                summary.add_scalar('episodes_reward',
-                                   episodes_rewards[agent_id], episode_count)
-                # the avg travel time is same for all agents.
-                summary.add_scalar('average_travel_time', avg_travel_time,
-                                   episode_count)
-            logger.info('episode_count: {}, average_travel_time: {}.'.format(
-                episode_count, avg_travel_time))
-            # reset to zeros
-            episodes_rewards = np.zeros(n_agents)
+            # for agent_id, summary in enumerate(summarys):
+            #     summary.add_scalar('episodes_reward',
+            #                        episodes_rewards[agent_id], episode_count)
+            #     # the avg travel time is same for all agents.
+            #     summary.add_scalar('average_travel_time', avg_travel_time,
+            #                        episode_count)
+            # logger.info('episode_count: {}, average_travel_time: {}.'.format(
+            #     episode_count, avg_travel_time))
+            # # reset to zeros
+
+            env.save_csv(f"outputs/4x4/ql-4x4grid_run1", episode_count)
+
+            episodes_rewards = {}
             # save the model
             if episode_count % config['save_rate'] == 0:
                 for agent_id, agent in enumerate(ql_agents):

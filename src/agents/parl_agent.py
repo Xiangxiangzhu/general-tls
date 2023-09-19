@@ -18,27 +18,34 @@ import numpy as np
 
 
 class Agent(parl.Agent):
-    def __init__(self, algorithm, config):
+    def __init__(self, algorithm, config, tls):
         super(Agent, self).__init__(algorithm)
         self.device = torch.device("cuda" if torch.cuda.
                                    is_available() else "cpu")
         self.config = config
         self.epsilon = self.config['epsilon']
+        self.tls = tls
 
     def sample(self, obs):
         # The epsilon-greedy action selector.
-        def sample_random(act_dim):
-            # Random samples
-            return np.random.randint(0, act_dim)
+        # def sample_random(act_dim):
+        #     # Random samples
+        #     return np.random.randint(0, act_dim)
 
         obs = torch.FloatTensor(obs).to(self.device)
         logits = self.alg.sample(obs)
+        # masking invalid actions
+        action_mask = self.tls.observation_space.my_action_mask.to(obs.device)
+        logits[:, action_mask == 0] = float('-inf')
+
         act_dim = logits.shape[-1]
         act_values = logits.cpu().detach().numpy()
+
         actions = np.argmax(act_values, axis=-1)
         for i in range(obs.shape[0]):
             if np.random.rand() <= self.epsilon:
-                actions[i] = sample_random(act_dim)
+                valid_actions = np.where(action_mask.numpy() != 0)[0]
+                actions[i] = np.random.choice(valid_actions)
         return actions
 
     def predict(self, obs):
