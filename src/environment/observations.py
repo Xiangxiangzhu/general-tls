@@ -84,7 +84,8 @@ class DefaultObservationFunction(ObservationFunction):
         )
         action_mask = th.ones(8)
         if len(self.ts.sorted_incoming_roads) == 3:
-            action_mask[0:5] = 0
+            action_mask[0:4] = 0
+            action_mask[5:6] = 0
         elif len(self.ts.sorted_incoming_roads) == 2:
             action_mask[0:4] = 0
             action_mask[6:8] = 0
